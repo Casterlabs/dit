@@ -32,6 +32,9 @@ import net.dv8tion.jda.api.hooks.SubscribeEvent;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 
 public class DiscordSource implements ConversationSource {
+    public static final String HELP_PREFIX = "🚨 ";
+    public static final String SOLVED_PREFIX = "✅ ";
+
     private Map<String, Conversation> conversations = new HashMap<>();
 
     private JDA jda;
@@ -74,6 +77,8 @@ public class DiscordSource implements ConversationSource {
         this.jda.getThreadChannels()
             .stream()
             .filter((c -> c.getParentChannel().getIdLong() == this.config.forumParentChannel))
+            .filter((c) -> !c.getName().startsWith(HELP_PREFIX))
+            .filter((c) -> !c.getName().startsWith(SOLVED_PREFIX))
             .filter((c) -> !c.isLocked())
             .forEach((channel) -> {
                 try {
@@ -184,6 +189,15 @@ public class DiscordSource implements ConversationSource {
             Conversation conversation = conversations.get(conversationId);
             if (conversation == null) return;
 
+            net.dv8tion.jda.api.entities.Message reference = event.getMessage().getReferencedMessage();
+            if (reference != null) {
+                if (reference.getAuthor().isBot()) {
+                    conversation.messages.add(new Message(Role.system, "User replied directly to your message: " + reference.getContentRaw()));
+                } else {
+                    conversation.messages.add(new Message(Role.system, "User replied directly to their own message: " + reference.getContentRaw()));
+                }
+            }
+
             conversation.process(event.getAuthor().getId(), event.getMessage().getContentRaw());
         }
 
@@ -211,12 +225,14 @@ public class DiscordSource implements ConversationSource {
 
         @Override
         public void signalHelp() {
+            this.channel.getManager().setName(HELP_PREFIX + this.channel.getName()).submit();
             this.channel.sendMessage(config.helpPing).submit();
             this.close();
         }
 
         @Override
         public void signalSolved() {
+            this.channel.getManager().setName(SOLVED_PREFIX + this.channel.getName()).submit();
             this.channel.getManager().setLocked(true).submit();
             this.close();
         }
