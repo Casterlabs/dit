@@ -1,9 +1,12 @@
-.env
-
-node_modules/
-
+# IntelliJ
+*.iml
 .idea/
-.vscode/
+
+# Eclipse
+.settings/
+.project
+.classpath
+
+# Common
+target/
 .DS_Store
-docs/
-prompt.txt
