@@ -10,3 +10,4 @@
 # Common
 target/
 .DS_Store
+config.json

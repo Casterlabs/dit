@@ -1,4 +1,4 @@
-package co.casterlabs.dit.types;
+package co.casterlabs.dit.conversation;
 
 public enum Role {
     system,

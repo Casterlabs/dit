@@ -1,25 +1,18 @@
 package co.casterlabs.dit;
 
-import net.dv8tion.jda.api.JDA;
-import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.hooks.AnnotatedEventManager;
-import net.dv8tion.jda.api.requests.GatewayIntent;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+
+import co.casterlabs.dit.config.Config;
+import co.casterlabs.rakurai.json.Rson;
 
 public class Launcher {
+    private static final File CONFIG_FILE = new File("config.json");
 
-    public static void main(String[] args) throws InterruptedException {
-        JDA jda = JDABuilder.createDefault(Dit.BOT_TOKEN)
-            .enableIntents(
-                GatewayIntent.MESSAGE_CONTENT,
-                GatewayIntent.GUILD_MESSAGE_REACTIONS,
-                GatewayIntent.GUILD_EXPRESSIONS,
-                GatewayIntent.GUILD_MESSAGE_TYPING
-            )
-            .setEventManager(new AnnotatedEventManager())
-            .addEventListeners(new MessageListener())
-            .build();
-
-        jda.awaitReady();
+    public static void main(String[] args) throws IOException {
+        String configContents = Files.readString(CONFIG_FILE.toPath());
+        Dit.config = Rson.DEFAULT.fromJson(configContents, Config.class);
     }
 
 }
