@@ -3,9 +3,11 @@ package co.casterlabs.dit.config.source;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.jetbrains.annotations.Nullable;
 
+import co.casterlabs.dit.Dit;
 import co.casterlabs.dit.config.AIProvider;
 import co.casterlabs.dit.config.ConversationSource;
 import co.casterlabs.dit.conversation.Conversation;
@@ -30,14 +32,20 @@ import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.AnnotatedEventManager;
 import net.dv8tion.jda.api.hooks.SubscribeEvent;
 import net.dv8tion.jda.api.requests.GatewayIntent;
+import xyz.e3ndr.fastloggingframework.logging.FastLogger;
 
 public class DiscordSource implements ConversationSource {
     public static final String HELP_PREFIX = "🚨 ";
     public static final String SOLVED_PREFIX = "✅ ";
 
+    private FastLogger logger;
+
     private Map<String, Conversation> conversations = new HashMap<>();
 
+    private String previousBotToken;
     private JDA jda;
+
+    private Thread conversationEndThread;
 
     private AIProvider ai;
     private Config config;
@@ -52,57 +60,90 @@ public class DiscordSource implements ConversationSource {
 
     @Override
     public void load(@NonNull JsonObject config, @NonNull AIProvider ai) throws JsonValidationException, JsonParseException {
-        this.close();
-
+        this.conversationEndThread = null;
         this.config = Rson.DEFAULT.fromJson(config, Config.class);
-        this.ai = ai;
 
-        this.jda = JDABuilder.createDefault(this.config.botToken)
-            .enableIntents(
-                GatewayIntent.MESSAGE_CONTENT,
-                GatewayIntent.GUILD_MESSAGE_REACTIONS,
-                GatewayIntent.GUILD_EXPRESSIONS,
-                GatewayIntent.GUILD_MESSAGE_TYPING
-            )
-            .setEventManager(new AnnotatedEventManager())
-            .addEventListeners(new MessageListener())
-            .build();
-
-        try {
-            this.jda.awaitReady();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        // If the bot token hasn't changed, don't reload.
+        // Changing the bot token is considered terminal and will force a full reload.
+        if (this.previousBotToken != null) {
+            if (this.previousBotToken.equals(this.config.botToken)) {
+                this.logger.info("Reloading...");
+            } else {
+                this.close();
+                this.logger = null;
+            }
         }
 
-        this.jda.getThreadChannels()
-            .stream()
-            .filter((c -> c.getParentChannel().getIdLong() == this.config.forumParentChannel))
-            .filter((c) -> !c.getName().startsWith(HELP_PREFIX))
-            .filter((c) -> !c.getName().startsWith(SOLVED_PREFIX))
-            .filter((c) -> !c.isLocked())
-            .forEach((channel) -> {
+        if (this.logger == null) {
+            this.logger = new FastLogger("DiscordSource@" + this.config.botToken.hashCode());
+            this.logger.info("Loading...");
+        }
+
+        this.conversationEndThread = Thread.ofPlatform().name("Discord Conversation End Thread").start(() -> {
+            Thread currentThread = Thread.currentThread();
+
+            while (this.conversationEndThread == currentThread) {
                 try {
-                    String conversationId = channel.getId();
-                    Conversation conversation = new Conversation(new DiscordConversationHandle(channel), ai);
+                    TimeUnit.SECONDS.sleep(30);
+                } catch (InterruptedException ignored) {}
 
-                    conversation.messages.add(new Message(Role.system, "Post title: " + channel.getName()));
-
-                    // Get entire message history. Add it as an assistant message if the author is a
-                    // bot, otherwise add it as a user message
-                    channel.getHistory().retrievePast(100).complete().forEach((message) -> {
-                        if (message.getAuthor().isBot()) {
-                            conversation.messages.add(new Message(Role.assistant, message.getContentDisplay()));
-                        } else {
-                            conversation.messages.add(new Message(Role.user, message.getContentDisplay()));
+                for (Conversation conversation : this.conversations.values().toArray(new Conversation[0])) {
+                    if (System.currentTimeMillis() - conversation.createdAt > TimeUnit.MINUTES.toMillis(Dit.CONVERSATION_MAXAGE_MINUTES)) {
+                        try {
+                            conversation.handle.signalHelp();
+                            conversation.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
                         }
-                    });
-
-                    System.out.printf("Conversation resumed! %s\n", conversationId);
-                    this.conversations.put(conversationId, conversation);
-                } catch (IOException | InterruptedException e) {
-                    e.printStackTrace();
+                    }
                 }
-            });
+            }
+        });
+
+        AIProvider oldAI = this.ai;
+        this.ai = ai; // Seamless reload.
+        if (oldAI != null) {
+            try {
+                oldAI.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        if (this.jda == null) {
+            this.previousBotToken = this.config.botToken;
+            this.jda = JDABuilder.createDefault(this.config.botToken)
+                .enableIntents(
+                    GatewayIntent.MESSAGE_CONTENT,
+                    GatewayIntent.GUILD_MESSAGE_REACTIONS,
+                    GatewayIntent.GUILD_EXPRESSIONS,
+                    GatewayIntent.GUILD_MESSAGE_TYPING
+                )
+                .setEventManager(new AnnotatedEventManager())
+                .addEventListeners(new MessageListener())
+                .build();
+
+            try {
+                this.jda.awaitReady();
+                this.logger.info("Ready!");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            this.jda.getThreadChannels()
+                .stream()
+                .filter((c -> c.getParentChannel().getIdLong() == this.config.forumParentChannel))
+                .filter((c) -> !c.getName().startsWith(HELP_PREFIX))
+                .filter((c) -> !c.getName().startsWith(SOLVED_PREFIX))
+                .filter((c) -> !c.isLocked())
+                .forEach((channel) -> {
+                    try {
+                        this.startWithHistory(channel);
+                    } catch (IOException | InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                });
+        }
     }
 
     @Override
@@ -112,8 +153,11 @@ public class DiscordSource implements ConversationSource {
 
     @Override
     public void close() {
+        this.logger.info("Shutting down...");
+
         if (this.jda != null) {
             this.jda.shutdown();
+            this.jda = null;
         }
 
         if (this.ai != null) {
@@ -130,6 +174,26 @@ public class DiscordSource implements ConversationSource {
         this.conversations.clear();
     }
 
+    private void startWithHistory(ThreadChannel channel) throws IOException, InterruptedException {
+        String conversationId = channel.getId();
+        Conversation conversation = new Conversation(new DiscordConversationHandle(channel));
+
+        conversation.messages.add(new Message(Role.system, "Post title: " + channel.getName()));
+
+        // Get entire message history. Add it as an assistant message if the author is a
+        // bot, otherwise add it as a user message
+        channel.getHistory().retrievePast(100).complete().forEach((message) -> {
+            if (message.getAuthor().isBot()) {
+                conversation.messages.add(new Message(Role.assistant, message.getContentDisplay()));
+            } else {
+                conversation.messages.add(new Message(Role.user, message.getContentDisplay()));
+            }
+        });
+
+        logger.info("Conversation resumed! %s", conversationId);
+        this.conversations.put(conversationId, conversation);
+    }
+
     private class MessageListener {
 
         @SubscribeEvent
@@ -141,14 +205,14 @@ public class DiscordSource implements ConversationSource {
 
             try {
                 String conversationId = channel.getId();
-                Conversation conversation = new Conversation(new DiscordConversationHandle(channel), ai);
+                Conversation conversation = new Conversation(new DiscordConversationHandle(channel));
 
-                conversation.messages.add(new Message(Role.system, "Post title: " + channel.getName()));
+                conversation.messages.add(new Message(Role.user, "Post title: " + channel.getName()));
 
                 channel.sendMessage(config.header).complete();
                 channel.sendMessage("-------------------------------------").complete();
 
-                System.out.printf("Conversation started! %s\n", conversationId);
+                logger.info("Conversation started! %s", conversationId);
                 conversations.put(conversationId, conversation);
             } catch (IOException | InterruptedException e) {
                 e.printStackTrace();
@@ -157,15 +221,26 @@ public class DiscordSource implements ConversationSource {
 
         @SubscribeEvent
         public void onThreadLock(ChannelUpdateLockedEvent event) {
-            if (!event.getChannel().asThreadChannel().isLocked()) return;
+            ThreadChannel channel = event.getChannel().asThreadChannel();
+            Conversation conversation = conversations.remove(channel.getId());
 
-            Conversation conversation = conversations.remove(event.getChannel().getId());
-            if (conversation == null) return;
+            if (channel.isLocked()) {
+                if (conversation == null) return;
+                try {
+                    conversation.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } else {
+                if (channel.getName().startsWith(SOLVED_PREFIX)) {
+                    channel.getManager().setName(channel.getName().substring(SOLVED_PREFIX.length())).submit();
+                }
 
-            try {
-                conversation.close();
-            } catch (IOException e) {
-                e.printStackTrace();
+                try {
+                    startWithHistory(channel);
+                } catch (IOException | InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
         }
 
@@ -192,9 +267,9 @@ public class DiscordSource implements ConversationSource {
             net.dv8tion.jda.api.entities.Message reference = event.getMessage().getReferencedMessage();
             if (reference != null) {
                 if (reference.getAuthor().isBot()) {
-                    conversation.messages.add(new Message(Role.system, "User replied directly to your message: " + reference.getContentRaw()));
+                    conversation.messages.add(new Message(Role.user, "User is replying directly to your message: " + reference.getContentRaw()));
                 } else {
-                    conversation.messages.add(new Message(Role.system, "User replied directly to their own message: " + reference.getContentRaw()));
+                    conversation.messages.add(new Message(Role.user, "User is replying directly to their own message: " + reference.getContentRaw()));
                 }
             }
 
@@ -206,6 +281,11 @@ public class DiscordSource implements ConversationSource {
     @RequiredArgsConstructor
     private class DiscordConversationHandle implements ConversationHandle {
         private final ThreadChannel channel;
+
+        @Override
+        public AIProvider ai() {
+            return ai;
+        }
 
         @Override
         public void startThinking() {
@@ -241,7 +321,7 @@ public class DiscordSource implements ConversationSource {
         public void close() {
             Conversation conversation = conversations.remove(this.channel.getId());
             if (conversation == null) return;
-            System.out.printf("Conversation ended! %s\n", this.channel.getId());
+            logger.info("Conversation ended! %s", this.channel.getId());
 
             try {
                 conversation.close();

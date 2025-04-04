@@ -23,8 +23,6 @@ public interface AIProvider extends Closeable {
 
     public Type type();
 
-    public void begin(Conversation conversation) throws IOException, InterruptedException;
-
     public void process(String userId, Conversation conversation) throws IOException, InterruptedException;
 
     public static enum Type {

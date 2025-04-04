@@ -15,6 +15,7 @@ import co.casterlabs.dit.conversation.Role;
 import co.casterlabs.dit.util.RsonBodyHandler;
 import co.casterlabs.rakurai.json.Rson;
 import co.casterlabs.rakurai.json.annotating.JsonClass;
+import co.casterlabs.rakurai.json.element.JsonArray;
 import co.casterlabs.rakurai.json.element.JsonObject;
 import co.casterlabs.rakurai.json.serialization.JsonParseException;
 import co.casterlabs.rakurai.json.validation.JsonValidationException;
@@ -45,11 +46,6 @@ public class OpenWebUIProvider implements AIProvider {
     }
 
     @Override
-    public void begin(Conversation conversation) {
-        conversation.messages.add(new Message(Role.system, this.config.prompt));
-    }
-
-    @Override
     public void process(String userId, Conversation conversation) {
         String responseMessage = null;
         {
@@ -71,7 +67,7 @@ public class OpenWebUIProvider implements AIProvider {
                             .getObject(0)
                             .getObject("message")
                             .getString("content");
-//                        System.out.println(responseMessage);
+//                        System.out.println(response.body());
                         break;
                     }
                 } catch (InterruptedException | IOException e) {
@@ -100,9 +96,13 @@ public class OpenWebUIProvider implements AIProvider {
     }
 
     private HttpResponse<JsonObject> call(Conversation conversation) throws IOException, InterruptedException {
+        JsonArray messages = new JsonArray();
+        messages.add(Rson.DEFAULT.toJson(new Message(Role.system, this.config.prompt)));
+        conversation.messages.forEach((m) -> messages.add(Rson.DEFAULT.toJson(m)));
+
         JsonObject body = new JsonObject()
             .put("model", this.config.model)
-            .put("messages", Rson.DEFAULT.toJson(conversation.messages));
+            .put("messages", messages);
 
         if (this.config.additionalParameters != null) {
             this.config.additionalParameters.forEach((e) -> body.put(e.getKey(), e.getValue()));
