@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -56,6 +57,7 @@ public class DiscordSource implements ConversationSource {
         public final Long forumParentChannel = null;
         public final String helpPing = null;
         public final String header = null;
+        public final String imageBaseUrl = null;
     }
 
     @Override
@@ -300,6 +302,24 @@ public class DiscordSource implements ConversationSource {
         @Override
         public void postMessage(@Nullable String content) {
             if (content == null || content.isBlank()) return;
+
+            Matcher m = Dit.IMAGE_PATTERN.matcher(content);
+            while (m.find()) {
+                String imageTag = m.group();
+
+                if (imageTag.equalsIgnoreCase(Dit.IMAGE_EXAMPLE)) {
+                    content = content.replace(imageTag, "");
+                    continue;
+                }
+
+                String imageUrl = imageTag.substring(Dit.IMAGE_SUBSTR_START, imageTag.length() - Dit.IMAGE_SUBSTR_END_DELTA);
+                if (config.imageBaseUrl != null) {
+                    imageUrl = config.imageBaseUrl + imageUrl;
+                }
+
+                content = content.replace(imageTag, String.format("[Image](%s)", imageUrl));
+            }
+
             this.channel.sendMessage(content).submit();
         }
 
