@@ -1,0 +1,9 @@
+services:
+  dit:
+    image: ghcr.io/casterlabs/dit:latest
+    restart: always
+    volumes:
+      - dit:/home/container/config
+
+volumes:
+    dit:
