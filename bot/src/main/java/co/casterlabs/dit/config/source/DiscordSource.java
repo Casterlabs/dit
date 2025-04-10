@@ -15,7 +15,7 @@ import co.casterlabs.dit.conversation.Conversation;
 import co.casterlabs.dit.conversation.ConversationHandle;
 import co.casterlabs.dit.conversation.Message;
 import co.casterlabs.dit.conversation.Role;
-import co.casterlabs.dit.util.ImageChecker;
+import co.casterlabs.dit.util.ResourceChecker;
 import co.casterlabs.rakurai.json.Rson;
 import co.casterlabs.rakurai.json.annotating.JsonClass;
 import co.casterlabs.rakurai.json.element.JsonObject;
@@ -305,23 +305,18 @@ public class DiscordSource implements ConversationSource {
         public void postMessage(@Nullable String content) {
             if (content == null || content.isBlank()) return;
 
-            Matcher m = Dit.IMAGE_PATTERN.matcher(content);
+            Matcher m = Dit.MEDIA_PATTERN.matcher(content);
             while (m.find()) {
                 String imageTag = m.group();
 
-                if (imageTag.equalsIgnoreCase(Dit.IMAGE_EXAMPLE)) {
-                    content = content.replace(imageTag, "");
-                    continue;
-                }
-
-                String imageUrl = imageTag.substring(Dit.IMAGE_SUBSTR_START, imageTag.length() - Dit.IMAGE_SUBSTR_END_DELTA);
+                String imageUrl = imageTag.substring(Dit.MEDIA_SUBSTR_START, imageTag.length() - Dit.MEDIA_SUBSTR_END_DELTA);
                 boolean isAlreadyValidLink = imageUrl.startsWith("https://") || imageUrl.startsWith("https://");
 
                 if (config.imageBaseUrl != null && !isAlreadyValidLink) {
                     imageUrl = config.imageBaseUrl + imageUrl;
                 }
 
-                if (ImageChecker.check(imageUrl)) {
+                if (ResourceChecker.checkMedia(imageUrl)) {
                     content = content.replace(imageTag, String.format("[Image](%s)", imageUrl));
                 } else {
                     FastLogger.logStatic(LogLevel.WARNING, "Bot posted an invalid image link: %s", imageUrl);
