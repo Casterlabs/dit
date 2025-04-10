@@ -329,6 +329,12 @@ public class DiscordSource implements ConversationSource {
                 }
             }
 
+            content = content
+                .trim() // Remove junk
+                .replace('\r', '\n') // Convert CRLF to LF
+                .replaceAll("\\n+", "\n\n"); // Remove long runs of newlines. Usually caused by the bot putting [tags] in the
+                                             // middle of a message
+
             this.channel.sendMessage(content).submit();
         }
 
