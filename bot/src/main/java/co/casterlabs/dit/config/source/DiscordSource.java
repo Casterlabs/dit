@@ -313,7 +313,9 @@ public class DiscordSource implements ConversationSource {
                 }
 
                 String imageUrl = imageTag.substring(Dit.IMAGE_SUBSTR_START, imageTag.length() - Dit.IMAGE_SUBSTR_END_DELTA);
-                if (config.imageBaseUrl != null) {
+                boolean isAlreadyValidLink = imageUrl.startsWith("https://") || imageUrl.startsWith("https://");
+
+                if (config.imageBaseUrl != null && !isAlreadyValidLink) {
                     imageUrl = config.imageBaseUrl + imageUrl;
                 }
 
