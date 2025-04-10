@@ -15,6 +15,7 @@ import co.casterlabs.dit.conversation.Conversation;
 import co.casterlabs.dit.conversation.ConversationHandle;
 import co.casterlabs.dit.conversation.Message;
 import co.casterlabs.dit.conversation.Role;
+import co.casterlabs.dit.util.ImageChecker;
 import co.casterlabs.rakurai.json.Rson;
 import co.casterlabs.rakurai.json.annotating.JsonClass;
 import co.casterlabs.rakurai.json.element.JsonObject;
@@ -34,6 +35,7 @@ import net.dv8tion.jda.api.hooks.AnnotatedEventManager;
 import net.dv8tion.jda.api.hooks.SubscribeEvent;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import xyz.e3ndr.fastloggingframework.logging.FastLogger;
+import xyz.e3ndr.fastloggingframework.logging.LogLevel;
 
 public class DiscordSource implements ConversationSource {
     public static final String HELP_PREFIX = "🚨 ";
@@ -319,7 +321,12 @@ public class DiscordSource implements ConversationSource {
                     imageUrl = config.imageBaseUrl + imageUrl;
                 }
 
-                content = content.replace(imageTag, String.format("[Image](%s)", imageUrl));
+                if (ImageChecker.check(imageUrl)) {
+                    content = content.replace(imageTag, String.format("[Image](%s)", imageUrl));
+                } else {
+                    FastLogger.logStatic(LogLevel.WARNING, "Bot posted an invalid image link: %s", imageUrl);
+                    content = content.replace(imageTag, "");
+                }
             }
 
             this.channel.sendMessage(content).submit();
