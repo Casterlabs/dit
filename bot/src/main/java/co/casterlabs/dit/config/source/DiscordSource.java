@@ -178,11 +178,22 @@ public class DiscordSource implements ConversationSource {
         this.conversations.clear();
     }
 
-    private void startWithHistory(ThreadChannel channel) throws IOException, InterruptedException {
+    private Conversation start(ThreadChannel channel) throws IOException, InterruptedException {
         String conversationId = channel.getId();
         Conversation conversation = new Conversation(new DiscordConversationHandle(channel));
 
+        String tags = String.join(", ", channel.getAppliedTags().stream().map((t) -> t.getName()).toList());
+
         conversation.messages.add(new Message(Role.system, "Post title: " + channel.getName()));
+        conversation.messages.add(new Message(Role.system, "Post tagged as: " + tags));
+
+        this.conversations.put(conversationId, conversation);
+
+        return conversation;
+    }
+
+    private void startWithHistory(ThreadChannel channel) throws IOException, InterruptedException {
+        Conversation conversation = this.start(channel);
 
         // Get entire message history. Add it as an assistant message if the author is a
         // bot, otherwise add it as a user message
@@ -194,8 +205,7 @@ public class DiscordSource implements ConversationSource {
             }
         });
 
-        logger.info("Conversation resumed! %s", conversationId);
-        this.conversations.put(conversationId, conversation);
+        logger.info("Conversation resumed! %s", channel.getId());
     }
 
     private class MessageListener {
@@ -208,16 +218,12 @@ public class DiscordSource implements ConversationSource {
             if (channel.getParentChannel().getIdLong() != config.forumParentChannel) return;
 
             try {
-                String conversationId = channel.getId();
-                Conversation conversation = new Conversation(new DiscordConversationHandle(channel));
-
-                conversation.messages.add(new Message(Role.user, "Post title: " + channel.getName()));
+                start(channel);
 
                 channel.sendMessage(config.header).complete();
                 channel.sendMessage("-------------------------------------").complete();
 
-                logger.info("Conversation started! %s", conversationId);
-                conversations.put(conversationId, conversation);
+                logger.info("Conversation started! %s", channel.getId());
             } catch (IOException | InterruptedException e) {
                 e.printStackTrace();
             }
